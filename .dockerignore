@@ -1,0 +1,4 @@
+**/target/
+**/.cpcache/
+**/node_modules/
+*.log

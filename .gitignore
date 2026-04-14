@@ -1,0 +1,6 @@
+.env
+*.log
+**/target/
+**/.cpcache/
+**/node_modules/
+.DS_Store
