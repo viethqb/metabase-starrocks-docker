@@ -56,6 +56,17 @@ RUN ./bin/build.sh
 # Build the StarRocks driver plugin jar (lands in resources/modules/)
 RUN ./bin/build-driver.sh "${DRIVER_NAME}"
 
+# `./bin/build.sh` bundles a copy of `modules/starrocks.metabase-driver.jar` INSIDE
+# `metabase.jar` using whatever was in `resources/modules/` at that moment (often a
+# stale copy from an earlier compile iteration, because Clojure .cpcache persists).
+# At runtime, Metabase's plugin init re-extracts that stale bundled jar over the
+# freshly-COPY-ed file in `/plugins/`, silently reverting us to old driver code.
+# Strip the bundled entry so the only surviving copy is the one we place directly
+# into `/plugins/` in the runtime stage.
+RUN apt-get update && apt-get install -y --no-install-recommends zip \
+    && zip -d target/uberjar/metabase.jar "modules/${DRIVER_NAME}.metabase-driver.jar" \
+    && apt-get purge -y zip && rm -rf /var/lib/apt/lists/*
+
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime (JRE + Metabase jar + StarRocks plugin)
 # -----------------------------------------------------------------------------
