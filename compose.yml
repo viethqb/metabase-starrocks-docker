@@ -17,11 +17,78 @@ services:
       interval: 5s
       retries: 20
 
+  # ---------- MinIO (S3-compatible storage for Iceberg warehouse) ----------
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: mb-minio
+    hostname: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+    ports:
+      - "9101:9001"   # web console (host 9101 → container 9001)
+      - "9100:9000"   # S3 API     (host 9100 → container 9000)
+    volumes:
+      - minio_data:/data
+    networks: [sr]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: create the `warehouse` bucket in MinIO if missing.
+  minio-init:
+    image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+    container_name: mb-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        set -e;
+        mc alias set local http://minio:9000 admin password;
+        mc mb --ignore-existing local/warehouse;
+        mc anonymous set public local/warehouse;
+        echo 'MinIO warehouse bucket ready.';
+      "
+    networks: [sr]
+    restart: "no"
+
+  # ---------- Iceberg REST catalog ----------
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:1.8.1
+    container_name: mb-iceberg-rest
+    hostname: iceberg-rest
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+    ports:
+      - "8181:8181"
+    networks: [sr]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8181/v1/config?warehouse=s3://warehouse/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
   # ---------- StarRocks FE (MySQL protocol port 9030) ----------
   starrocks-fe:
     image: viet1846/starrocks-fe-ubuntu:4.0-latest
     container_name: mb-starrocks-fe
     hostname: mb-starrocks-fe
+    depends_on:
+      iceberg-rest:
+        condition: service_healthy
     command:
       - /bin/bash
       - -c
@@ -100,6 +167,7 @@ volumes:
   postgres_data:
   sr_fe_data:
   sr_be_data:
+  minio_data:
 
 networks:
   sr:
