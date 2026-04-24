@@ -49,6 +49,12 @@ COPY drivers-deps.edn modules/drivers/deps.edn
 COPY apply-ee-bypass.sh /tmp/apply-ee-bypass.sh
 RUN bash /tmp/apply-ee-bypass.sh && rm /tmp/apply-ee-bypass.sh
 
+# Patch frontend constants that hard-gate features by engine allowlist
+# (e.g. ALLOWED_ENGINES_FOR_TABLE_EDITING). Must run BEFORE `./bin/build.sh`
+# because webpack bakes the constants into the JS bundle.
+COPY apply-frontend-patches.sh /tmp/apply-frontend-patches.sh
+RUN bash /tmp/apply-frontend-patches.sh && rm /tmp/apply-frontend-patches.sh
+
 # Build the uberjar (frontend + backend). MB_EDITION=ee bundles enterprise code.
 ENV MB_EDITION=${MB_EDITION}
 RUN ./bin/build.sh

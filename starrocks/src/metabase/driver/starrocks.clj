@@ -125,23 +125,31 @@
 
 (defn- list-tables-in-catalog
   "Enumerate tables within a single StarRocks catalog via `<catalog>.information_schema.tables`.
-   Returns a set of table maps with `:schema` already prefixed by the catalog."
+   Returns a set of table maps with `:schema` already prefixed by the catalog.
+   `:is_writable` is set only for `default_catalog` (StarRocks internal tables); external
+   catalogs (iceberg/hive/hudi/jdbc) are read-only through Metabase."
   [^Connection conn ^String catalog]
-  (let [sql (format (str "SELECT table_schema, table_name, table_type, table_comment "
-                         "FROM `%s`.`information_schema`.`tables`")
-                    catalog)]
+  (let [sql         (format (str "SELECT table_schema, table_name, table_type, table_comment "
+                                 "FROM `%s`.`information_schema`.`tables`")
+                            catalog)
+        writable?   (= catalog "default_catalog")]
     (try
       (with-open [stmt (.createStatement conn)
                   rs   (.executeQuery stmt sql)]
         (let [acc (java.util.HashSet.)]
           (while (.next rs)
-            (let [schema  (.getString rs "table_schema")
-                  tname   (.getString rs "table_name")
-                  comment (.getString rs "table_comment")]
+            (let [schema    (.getString rs "table_schema")
+                  tname     (.getString rs "table_name")
+                  ttype     (.getString rs "table_type")
+                  ;; Only BASE TABLE rows carry a primary key usable for editing.
+                  ;; VIEW / SYSTEM VIEW stay read-only regardless of catalog.
+                  writable? (and writable? (= ttype "BASE TABLE"))
+                  comment   (.getString rs "table_comment")]
               (when-not (contains? excluded-schemas schema)
                 (.add acc
-                      (cond-> {:schema (str catalog "." schema)
-                               :name   tname}
+                      (cond-> {:schema      (str catalog "." schema)
+                               :name        tname
+                               :is_writable writable?}
                         (not (str/blank? comment)) (assoc :description comment))))))
           (set acc)))
       (catch Throwable e
